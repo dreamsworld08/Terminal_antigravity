@@ -30,6 +30,8 @@ export const metadata: Metadata = {
 import { Providers } from "@/components/providers/Providers";
 import CartSlideOver from "@/components/cart/CartSlideOver";
 
+import { Analytics } from '@vercel/analytics/react';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -42,6 +44,7 @@ export default function RootLayout({
           {children}
           <CartSlideOver />
         </Providers>
+        <Analytics />
       </body>
     </html>
   );
