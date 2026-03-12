@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   if (!code) {
     const error = searchParams.get("error");
     return NextResponse.redirect(
-      new URL(`/ims?error=${error || "no_code"}`, request.url)
+      new URL(`/admin?error=${error || "no_code"}`, request.url)
     );
   }
 
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     if (tokenData.error) {
       console.error("Zoho token error:", tokenData);
       return NextResponse.redirect(
-        new URL(`/ims?error=${tokenData.error}`, request.url)
+        new URL(`/admin?error=${tokenData.error}`, request.url)
       );
     }
 
@@ -71,12 +71,12 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.redirect(
-      new URL("/ims?zoho=connected", request.url)
+      new URL("/admin?zoho=connected", request.url)
     );
   } catch (error) {
     console.error("Zoho callback error:", error);
     return NextResponse.redirect(
-      new URL("/ims?error=token_exchange_failed", request.url)
+      new URL("/admin?error=token_exchange_failed", request.url)
     );
   }
 }
