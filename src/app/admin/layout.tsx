@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import {
     LayoutDashboard, Package, ShoppingCart, Users,
     Settings, BarChart3, ChevronLeft, Menu, X, Shield,
-    LogOut, Sparkles
+    LogOut, Sparkles, ExternalLink
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -80,7 +80,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </nav>
 
                 {/* Bottom */}
-                <div className="p-4 border-t border-white/5">
+                <div className="p-4 border-t border-white/5 space-y-1">
+                    <a
+                        href="https://inventory.zoho.in"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-orange-400 hover:text-orange-300 hover:bg-white/5 rounded-lg transition-colors"
+                    >
+                        <ExternalLink size={16} />
+                        Zoho Inventory
+                    </a>
                     <Link
                         href="/dashboard"
                         className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500 hover:text-white transition-colors"
