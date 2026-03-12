@@ -1,28 +1,42 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Package, TrendingUp, AlertTriangle, CheckCircle, ArrowRight, DollarSign, Activity } from "lucide-react";
+import { Package, TrendingUp, AlertTriangle, CheckCircle, ArrowRight, DollarSign, Activity, Link2, ExternalLink } from "lucide-react";
 import Link from "next/link";
-// We would normally use Recharts here, but bypassing to use pure HTML/CSS for simple charts to avoid dependency issues
-// if recharts isn't installed.
 
 export default function IMSDashboard() {
     const [stats, setStats] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [zohoConnected, setZohoConnected] = useState(false);
+    const [dataSource, setDataSource] = useState<string>("local");
 
     useEffect(() => {
-        const fetchDashboard = async () => {
+        const fetchAll = async () => {
             try {
-                const res = await fetch("/api/ims/analytics");
+                // Check Zoho connection status
+                const zohoRes = await fetch("/api/zoho/status");
+                const zohoData = await zohoRes.json();
+                setZohoConnected(zohoData.connected);
+
+                // Fetch dashboard data
+                const res = await fetch("/api/ims/stats");
                 const data = await res.json();
                 setStats(data);
+                setDataSource(data.source || "local");
             } catch (err) {
                 console.error("Dashboard error:", err);
             } finally {
                 setIsLoading(false);
             }
         };
-        fetchDashboard();
+
+        // Check URL for Zoho connection result
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("zoho") === "connected") {
+            setZohoConnected(true);
+        }
+
+        fetchAll();
     }, []);
 
     if (isLoading) {
@@ -46,12 +60,36 @@ export default function IMSDashboard() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Overview Dashboard</h1>
-                    <p className="text-sm text-gray-500 mt-1">Real-time inventory metrics and alerts.</p>
+                    <div className="flex items-center gap-2 mt-1">
+                        <p className="text-sm text-gray-500">Real-time inventory metrics and alerts.</p>
+                        {zohoConnected ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full mr-1.5 animate-pulse"></span>
+                                Zoho Connected
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                                Local Data
+                            </span>
+                        )}
+                    </div>
                 </div>
                 <div className="flex space-x-3">
-                    <button className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-sm transition-colors">
-                        Export Report
-                    </button>
+                    {!zohoConnected && (
+                        <a
+                            href="/api/zoho/auth"
+                            className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg text-sm font-medium hover:from-orange-600 hover:to-red-600 shadow-sm transition-all flex items-center"
+                        >
+                            <Link2 className="h-4 w-4 mr-2" />
+                            Connect Zoho Inventory
+                        </a>
+                    )}
+                    {zohoConnected && (
+                        <span className="px-4 py-2 bg-white border border-green-200 rounded-lg text-sm font-medium text-green-700 flex items-center">
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Zoho Synced
+                        </span>
+                    )}
                     <Link href="/ims/forecast" className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 shadow-sm transition-colors flex items-center">
                         <TrendingUp className="h-4 w-4 mr-2" />
                         Run AI Forecast
