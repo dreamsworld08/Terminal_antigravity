@@ -10,6 +10,8 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@dataconnect/admin-generated": "file:src/dataconnect-admin-generated",
+    "@dataconnect/generated": "file:src/dataconnect-generated",
     "@google/generative-ai": "^0.24.1",
     "@google/model-viewer": "^4.1.0",
     "@prisma/client": "^5.22.0",
@@ -18,6 +20,8 @@
     "@vercel/analytics": "^2.0.0",
     "@vercel/blob": "^2.3.1",
     "bcryptjs": "^3.0.3",
+    "firebase": "^12.10.0",
+    "firebase-admin": "^13.7.0",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",

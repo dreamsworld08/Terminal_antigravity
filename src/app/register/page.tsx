@@ -1,54 +1,114 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Mail, Lock, User, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Phone, User, ShieldCheck, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { Logo } from "@/components/ui/Logo";
+import { auth } from "@/lib/firebase";
+import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from "firebase/auth";
+
+declare global {
+    interface Window {
+        recaptchaVerifier: RecaptchaVerifier;
+    }
+}
+declare var grecaptcha: any;
 
 export default function RegisterPage() {
     const [name, setName] = useState("");
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [showPassword, setShowPassword] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState("");
+    const [otp, setOtp] = useState("");
+    const [step, setStep] = useState<"phone" | "otp">("phone");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
+    const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    useEffect(() => {
+        if (typeof window !== "undefined" && !window.recaptchaVerifier) {
+            window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
+                size: "invisible",
+            });
+        }
+    }, []);
+
+    const formatPhoneNumber = (number: string) => {
+        if (!number.startsWith("+")) {
+            return `+${number.replace(/\D/g, "")}`;
+        }
+        return number;
+    };
+
+    const handleSendOTP = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError("");
+        
+        if (!name.trim()) {
+            setError("Please enter your full name first.");
+            return;
+        }
+
+        setLoading(true);
+
+        try {
+            const formattedNumber = formatPhoneNumber(phoneNumber);
+            if (!window.recaptchaVerifier) throw new Error("Recaptcha not initialized");
+            
+            const confirmation = await signInWithPhoneNumber(auth, formattedNumber, window.recaptchaVerifier);
+            setConfirmationResult(confirmation);
+            setStep("otp");
+            setLoading(false);
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message || "Failed to send OTP. Please try again.");
+            setLoading(false);
+            
+            if (window.recaptchaVerifier && typeof window.recaptchaVerifier.render === 'function') {
+                try {
+                  window.recaptchaVerifier.render().then((widgetId) => {
+                    grecaptcha.reset(widgetId);
+                  });
+                } catch(e) {}
+            }
+        }
+    };
+
+    const handleVerifyOTP = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
         setLoading(true);
 
         try {
-            const res = await fetch("/api/auth/register", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, email, password }),
+            if (!confirmationResult) throw new Error("No OTP request found.");
+            
+            const result = await confirmationResult.confirm(otp);
+            const user = result.user;
+            const idToken = await user.getIdToken();
+
+            // First, trigger internal database setup if needed, and update the name
+            await fetch("/api/auth/register-phone", {
+                 method: "POST",
+                 headers: { "Content-Type": "application/json" },
+                 body: JSON.stringify({ name, phone: user.phoneNumber }),
             });
 
-            if (!res.ok) {
-                const data = await res.json();
-                setError(data.error || "Registration failed.");
-                setLoading(false);
-                return;
-            }
-
-            // Auto-login after successful registration
-            const result = await signIn("credentials", {
-                email,
-                password,
+            // Sign in to NextAuth
+            const signInResult = await signIn("phone", {
+                phone: user.phoneNumber,
+                idToken,
                 redirect: false,
             });
 
-            if (result?.error) {
-                // If login fails for some reason, redirect to manual login
-                window.location.href = "/login";
+            if (signInResult?.error) {
+                setError("Terminal authentication failed.");
+                setLoading(false);
             } else {
                 window.location.href = "/dashboard";
             }
-        } catch {
-            setError("Something went wrong. Please try again.");
+        } catch (err: any) {
+            console.error(err);
+            setError("Registration failed or invalid OTP.");
             setLoading(false);
         }
     };
@@ -114,75 +174,98 @@ export default function RegisterPage() {
                         </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div>
-                            <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
-                                Full Name
-                            </label>
-                            <div className="relative">
-                                <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
-                                <input
-                                    type="text"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    placeholder="Your name"
-                                    required
-                                    className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
-                                />
+                    {step === "phone" ? (
+                        <form onSubmit={handleSendOTP} className="space-y-6">
+                            <div>
+                                <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
+                                    Full Name
+                                </label>
+                                <div className="relative">
+                                    <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        placeholder="Your name"
+                                        required
+                                        className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
+                                    />
+                                </div>
                             </div>
-                        </div>
 
-                        <div>
-                            <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
-                                Email
-                            </label>
-                            <div className="relative">
-                                <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
-                                <input
-                                    type="email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="your@email.com"
-                                    required
-                                    className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
-                                />
+                            <div>
+                                <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
+                                    Mobile Number
+                                </label>
+                                <div className="relative">
+                                    <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
+                                    <input
+                                        type="tel"
+                                        value={phoneNumber}
+                                        onChange={(e) => setPhoneNumber(e.target.value)}
+                                        placeholder="+1 234 567 8900"
+                                        required
+                                        className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
+                                    />
+                                </div>
+                                <p className="text-xs text-luxury-stone mt-2">
+                                    Include your country code (e.g., +1 for US, +91 for India)
+                                </p>
                             </div>
-                        </div>
 
-                        <div>
-                            <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
-                                Password
-                            </label>
-                            <div className="relative">
-                                <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
-                                <input
-                                    type={showPassword ? "text" : "password"}
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    placeholder="Min. 8 characters"
-                                    required
-                                    minLength={8}
-                                    className="w-full pl-12 pr-12 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-luxury-stone"
-                                >
-                                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                                </button>
+                            <button
+                                type="submit"
+                                disabled={loading || !phoneNumber || !name}
+                                className="w-full bg-luxury-black text-luxury-ivory py-4 text-sm tracking-widest uppercase hover:bg-luxury-charcoal transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {loading ? "Authenticating..." : "Get OTP"}
+                                {!loading && <ArrowRight size={16} />}
+                            </button>
+                        </form>
+                    ) : (
+                        <form onSubmit={handleVerifyOTP} className="space-y-6">
+                            <div>
+                                <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
+                                    Enter OTP
+                                </label>
+                                <div className="relative">
+                                    <ShieldCheck size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
+                                    <input
+                                        type="text"
+                                        value={otp}
+                                        onChange={(e) => setOtp(e.target.value)}
+                                        placeholder="123456"
+                                        required
+                                        maxLength={6}
+                                        className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm text-center tracking-[0.5em]"
+                                    />
+                                </div>
                             </div>
-                        </div>
 
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full bg-luxury-black text-luxury-ivory py-4 text-sm tracking-widest uppercase hover:bg-luxury-charcoal transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                            {loading ? "Creating account..." : "Create Account"}
-                            {!loading && <ArrowRight size={16} />}
-                        </button>
-                    </form>
+                            <button
+                                type="submit"
+                                disabled={loading || otp.length < 6}
+                                className="w-full bg-luxury-black text-luxury-ivory py-4 text-sm tracking-widest uppercase hover:bg-luxury-charcoal transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {loading ? "Verifying..." : "Verify & Create Account"}
+                                {!loading && <ArrowRight size={16} />}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setStep("phone");
+                                    setOtp("");
+                                    setError("");
+                                }}
+                                className="w-full text-center text-xs text-luxury-stone hover:text-luxury-black mt-4"
+                            >
+                                Use a different phone number
+                            </button>
+                        </form>
+                    )}
+                    
+                    <div id="recaptcha-container"></div>
 
                     <p className="text-center text-sm text-luxury-stone mt-8">
                         Already have an account?{" "}

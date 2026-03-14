@@ -225,6 +225,8 @@ async function seed() {
     await prisma.order.deleteMany();
     await prisma.savedDesign.deleteMany();
     await prisma.customRequest.deleteMany();
+    await prisma.stockMovement.deleteMany();
+    await prisma.inventory.deleteMany();
     await prisma.product.deleteMany();
     await prisma.user.deleteMany();
 

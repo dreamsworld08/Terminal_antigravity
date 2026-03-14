@@ -1,45 +1,157 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { motion } from "framer-motion";
-import { Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Phone, ArrowRight, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { Logo } from "@/components/ui/Logo";
+import { auth } from "@/lib/firebase";
+import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from "firebase/auth";
+
+declare global {
+    interface Window {
+        recaptchaVerifier: RecaptchaVerifier;
+    }
+}
+declare var grecaptcha: any;
 
 export default function LoginPage() {
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [showPassword, setShowPassword] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState("");
+    const [otp, setOtp] = useState("");
+    const [step, setStep] = useState<"phone" | "otp">("phone");
     const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
+    const [isSending, setIsSending] = useState(false);
+    const [isVerifying, setIsVerifying] = useState(false);
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    // Cooldown timer for Resend OTP
+    useEffect(() => {
+        let timer: NodeJS.Timeout;
+        if (resendCooldown > 0) {
+            timer = setInterval(() => {
+                setResendCooldown((prev) => prev - 1);
+            }, 1000);
+        }
+        return () => clearInterval(timer);
+    }, [resendCooldown]);
+
+    useEffect(() => {
+        return () => {
+            if (window.recaptchaVerifier) {
+                try {
+                    window.recaptchaVerifier.clear();
+                    // @ts-ignore
+                    window.recaptchaVerifier = null;
+                } catch (e) {}
+            }
+        };
+    }, []);
+
+    const formatPhoneNumber = (number: string) => {
+        const cleaned = number.replace(/\D/g, "");
+        return number.startsWith("+") ? `+${cleaned}` : `+${cleaned}`;
+    };
+
+    const validatePhoneNumber = (number: string) => {
+        const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+        return phoneRegex.test(number.replace(/\s+/g, ""));
+    };
+
+    const handleSendOTP = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        setError("");
+        
+        const formattedNumber = formatPhoneNumber(phoneNumber);
+        if (!validatePhoneNumber(formattedNumber)) {
+            setError("Please enter a valid phone number with country code (e.g., +917976614691).");
+            return;
+        }
+
+        setIsSending(true);
+
+        try {
+            if (window.recaptchaVerifier) {
+                window.recaptchaVerifier.clear();
+            }
+            window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
+                size: "invisible",
+            });
+            
+            const confirmation = await signInWithPhoneNumber(auth, formattedNumber, window.recaptchaVerifier);
+            setConfirmationResult(confirmation);
+            setStep("otp");
+            setResendCooldown(60); // Start 60s cooldown
+        } catch (err: any) {
+            console.error("SMS Send Error (Full Object):", JSON.stringify(err, null, 2));
+            console.error("SMS Send Error Code:", err.code);
+            console.error("SMS Send Error Message:", err.message);
+            
+            let message = "Failed to send OTP. Please try again.";
+            if (err.code === "auth/invalid-app-credential") {
+                message = "Invalid app credential. Ensure the domain (like 127.0.0.1) is authorized in Firebase Console and your API key has no restrictions.";
+            } else if (err.code === "auth/too-many-requests") {
+                message = "Too many requests. Please try again later.";
+            } else if (err.code === "auth/invalid-phone-number") {
+                message = "The phone number is invalid. Use international format (e.g., +91...).";
+            } else if (err.message) {
+                message = err.message;
+            }
+
+            setError(message);
+            // Re-render/reset recaptcha if it fails
+            if (window.recaptchaVerifier) {
+                try {
+                    const widgetId = await window.recaptchaVerifier.render();
+                    grecaptcha.reset(widgetId);
+                } catch(e) {}
+            }
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    const handleVerifyOTP = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
-        setLoading(true);
 
-        const result = await signIn("credentials", {
-            email,
-            password,
-            redirect: false,
-        });
+        if (otp.length < 6) {
+            setError("Please enter a 6-digit OTP.");
+            return;
+        }
 
-        if (result?.error) {
-            setError("Invalid email or password.");
-            setLoading(false);
-        } else {
-            try {
-                const res = await fetch("/api/auth/session");
-                const session = await res.json();
-                if (session?.user?.role === "admin") {
-                    window.location.href = "/admin";
-                } else {
-                    window.location.href = "/dashboard";
-                }
-            } catch (err) {
+        setIsVerifying(true);
+
+        try {
+            if (!confirmationResult) throw new Error("No OTP request found.");
+            
+            const result = await confirmationResult.confirm(otp);
+            const user = result.user;
+            const idToken = await user.getIdToken();
+
+            const signInResult = await signIn("phone", {
+                phone: user.phoneNumber,
+                idToken,
+                redirect: false,
+            });
+
+            if (signInResult?.error) {
+                setError("Terminal authentication failed. Could not sync with customer profile.");
+            } else {
                 window.location.href = "/dashboard";
             }
+        } catch (err: any) {
+            console.error("Verification Error:", err);
+            let message = "Invalid OTP entered. Please try again.";
+            if (err.code === "auth/code-expired") {
+                message = "OTP has expired. Please request a new one.";
+            } else if (err.code === "auth/invalid-verification-code") {
+                message = "Invalid verification code. Please check and try again.";
+            }
+            setError(message);
+        } finally {
+            setIsVerifying(false);
         }
     };
 
@@ -93,10 +205,10 @@ export default function LoginPage() {
                     </Link>
 
                     <h1 className="font-display text-3xl text-luxury-black mb-2">
-                        Sign In
+                        Sign In or Sign Up
                     </h1>
                     <p className="text-luxury-stone text-sm mb-10">
-                        Enter your credentials to access your account.
+                        Enter your mobile number to access your account or create a new one.
                     </p>
 
                     {error && (
@@ -105,57 +217,92 @@ export default function LoginPage() {
                         </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div>
-                            <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
-                                Email
-                            </label>
-                            <div className="relative">
-                                <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
-                                <input
-                                    type="email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="your@email.com"
-                                    required
-                                    className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
-                                />
+                    {step === "phone" ? (
+                        <form onSubmit={handleSendOTP} className="space-y-6">
+                            <div>
+                                <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
+                                    Mobile Number
+                                </label>
+                                <div className="relative">
+                                    <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
+                                    <input
+                                        type="tel"
+                                        value={phoneNumber}
+                                        onChange={(e) => setPhoneNumber(e.target.value)}
+                                        placeholder="+91 79766 14691"
+                                        required
+                                        className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
+                                    />
+                                </div>
+                                <p className="text-xs text-luxury-stone mt-2">
+                                    Include your country code (e.g., +91 for India)
+                                </p>
                             </div>
-                        </div>
 
-                        <div>
-                            <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block">
-                                Password
-                            </label>
-                            <div className="relative">
-                                <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
-                                <input
-                                    type={showPassword ? "text" : "password"}
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    placeholder="••••••••"
-                                    required
-                                    className="w-full pl-12 pr-12 py-3 border border-luxury-sand/30 bg-luxury-white text-sm"
-                                />
+                            <button
+                                type="submit"
+                                disabled={isSending || !phoneNumber}
+                                className="w-full bg-luxury-black text-luxury-ivory py-4 text-sm tracking-widest uppercase hover:bg-luxury-charcoal transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {isSending ? "Sending OTP..." : "Get OTP"}
+                                {!isSending && <ArrowRight size={16} />}
+                            </button>
+                        </form>
+                    ) : (
+                        <form onSubmit={handleVerifyOTP} className="space-y-6">
+                            <div>
+                                <label className="text-xs tracking-widest uppercase text-luxury-stone mb-2 block text-center">
+                                    OTP sent to {phoneNumber}
+                                </label>
+                                <div className="relative">
+                                    <ShieldCheck size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-luxury-stone" />
+                                    <input
+                                        type="text"
+                                        value={otp}
+                                        onChange={(e) => setOtp(e.target.value)}
+                                        placeholder="123456"
+                                        required
+                                        maxLength={6}
+                                        className="w-full pl-12 pr-4 py-3 border border-luxury-sand/30 bg-luxury-white text-sm text-center tracking-[0.5em]"
+                                    />
+                                </div>
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={isVerifying || otp.length < 6}
+                                className="w-full bg-luxury-black text-luxury-ivory py-4 text-sm tracking-widest uppercase hover:bg-luxury-charcoal transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {isVerifying ? "Verifying..." : "Verify & Sign In"}
+                                {!isVerifying && <ArrowRight size={16} />}
+                            </button>
+                            
+                            <div className="flex flex-col gap-3 mt-4">
                                 <button
                                     type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-luxury-stone"
+                                    onClick={() => handleSendOTP()}
+                                    disabled={isSending || resendCooldown > 0}
+                                    className="text-xs text-luxury-brown hover:underline disabled:text-luxury-stone disabled:no-underline"
                                 >
-                                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                    {resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : "Resend OTP"}
+                                </button>
+                                
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setStep("phone");
+                                        setOtp("");
+                                        setError("");
+                                    }}
+                                    className="text-center text-xs text-luxury-stone hover:text-luxury-black"
+                                >
+                                    Use a different phone number
                                 </button>
                             </div>
-                        </div>
-
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full bg-luxury-black text-luxury-ivory py-4 text-sm tracking-widest uppercase hover:bg-luxury-charcoal transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                            {loading ? "Signing in..." : "Sign In"}
-                            {!loading && <ArrowRight size={16} />}
-                        </button>
-                    </form>
+                        </form>
+                    )}
+                    
+                    <div id="recaptcha-container"></div>
 
                     {/* Divider */}
                     <div className="flex items-center gap-4 my-8">
@@ -185,11 +332,9 @@ export default function LoginPage() {
                         </Link>
                     </p>
 
-                    {/* Demo Credentials */}
                     <div className="mt-8 p-4 bg-luxury-cream/70 border border-luxury-sand/20 text-xs text-luxury-stone">
-                        <p className="font-medium text-luxury-black mb-1">Demo Credentials</p>
-                        <p>Admin: admin@terminal.co / admin123</p>
-                        <p>Customer: alex@example.com / customer123</p>
+                        <p className="font-medium text-luxury-black mb-1">Testing Information</p>
+                        <p>Firebase invisible reCAPTCHA is active. Use your real phone number to receive an OTP.</p>
                     </div>
                 </motion.div>
             </div>

@@ -117,7 +117,6 @@ export default function ProductDetailPage() {
     const [selectedVariant, setSelectedVariant] = useState(0);
     const [addedToCart, setAddedToCart] = useState(false);
     const [isArMode, setIsArMode] = useState(false);
-    const [arModelUrl, setArModelUrl] = useState<string | null>(null);
     const modelViewerRef = useRef<any>(null);
 
     useEffect(() => {
@@ -176,12 +175,11 @@ export default function ProductDetailPage() {
                     }
                 });
 
-                // Export the scene with baked materials as a GLB blob for AR
-                // This ensures Scene Viewer / Quick Look receives the colored model
+                // NOTE: Exporting the scene as a Blob for AR breaks iOS Quick Look and Android Scene Viewer
+                /* 
                 try {
                     const glbBlob = await mv.exportScene({ binary: true });
                     const blobUrl = URL.createObjectURL(glbBlob);
-                    // Revoke previous blob URL to prevent memory leaks
                     setArModelUrl((prev: string | null) => {
                         if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
                         return blobUrl;
@@ -189,6 +187,7 @@ export default function ProductDetailPage() {
                 } catch (exportErr) {
                     console.warn("Could not export baked GLB for AR", exportErr);
                 }
+                */
             } catch (err) {
                 console.warn("Could not selectively color the model materials", err);
             }
@@ -299,7 +298,6 @@ export default function ProductDetailPage() {
                                                         exposure="1.2"
                                                         environment-image="legacy"
                                                         tone-mapping="neutral"
-                                                        {...(arModelUrl ? { "ar-src": arModelUrl } : {})}
                                                         style={{ width: "100%", height: "100%", backgroundColor: "#1a1a1a" }}
                                                     >
                                                         <button

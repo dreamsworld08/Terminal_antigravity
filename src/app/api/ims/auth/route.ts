@@ -14,7 +14,7 @@ export async function POST(request: Request) {
 
         const user = await prisma.iMSUser.findUnique({ where: { email } });
 
-        if (!user || !user.isActive) {
+        if (!user || !user.isActive || !user.hashedPassword) {
             return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
         }
 

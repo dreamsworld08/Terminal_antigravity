@@ -10,11 +10,11 @@ datasource db {
 model User {
   id             String          @id @default(cuid())
   name           String?
-  email          String          @unique
+  email          String?         @unique
   hashedPassword String?
   image          String?
   role           String          @default("customer")
-  phone          String?
+  phone          String?         @unique
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   orders         Order[]
@@ -110,8 +110,9 @@ model CustomRequest {
 model IMSUser {
   id             String   @id @default(cuid())
   name           String
-  email          String   @unique
-  hashedPassword String
+  email          String?  @unique
+  phone          String?  @unique
+  hashedPassword String?
   role           String   @default("superadmin")
   isActive       Boolean  @default(true)
   lastLogin      DateTime?

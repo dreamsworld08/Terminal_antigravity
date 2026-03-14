@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { prisma } from "./db";
+import { adminAuth } from "./firebase-admin";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
     providers: [
@@ -11,33 +12,75 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         }),
         Credentials({
-            name: "credentials",
+            name: "phone",
             credentials: {
-                email: { label: "Email", type: "email" },
-                password: { label: "Password", type: "password" },
+                phone: { label: "Phone", type: "text" },
+                idToken: { label: "Firebase ID Token", type: "text" },
             },
             async authorize(credentials) {
-                if (!credentials?.email || !credentials?.password) return null;
+                if (!credentials?.phone || !credentials?.idToken) return null;
 
-                const user = await prisma.user.findUnique({
-                    where: { email: credentials.email as string },
-                });
+                const phoneStr = credentials.phone as string;
+                const idTokenStr = credentials.idToken as string;
 
-                if (!user || !user.hashedPassword) return null;
+                console.log("[Auth] Authorizing phone:", phoneStr);
 
-                const isValid = await bcrypt.compare(
-                    credentials.password as string,
-                    user.hashedPassword
-                );
+                try {
+                    // Verify the Firebase ID token
+                    const decodedToken = await adminAuth.verifyIdToken(idTokenStr);
+                    const authenticatedPhone = decodedToken.phone_number;
 
-                if (!isValid) return null;
+                    if (!authenticatedPhone) {
+                        console.error("[Auth] No phone number in verified token");
+                        return null;
+                    }
 
-                return {
-                    id: user.id,
-                    email: user.email,
-                    name: user.name,
-                    image: user.image,
-                };
+                    console.log("[Auth] Firebase token verified for:", authenticatedPhone);
+
+                    // Atomic find or create using phone number as primary identifier
+                    let user = await prisma.user.findUnique({
+                        where: { phone: authenticatedPhone },
+                    });
+
+                    if (!user) {
+                        console.log("[Auth] Creating new user for phone:", authenticatedPhone);
+                        try {
+                            user = await prisma.user.create({
+                                data: {
+                                    phone: authenticatedPhone,
+                                    name: "New Customer",
+                                    email: `phone-${Date.now()}@terminal.app`, // Dummy email
+                                    role: "customer",
+                                },
+                            });
+                        } catch (createError: any) {
+                            // Handle race condition where user was created between findUnique and create
+                            if (createError.code === 'P2002') { 
+                                user = await prisma.user.findUnique({
+                                    where: { phone: authenticatedPhone },
+                                });
+                            } else {
+                                throw createError;
+                            }
+                        }
+                    }
+
+                    if (!user) {
+                        console.error("[Auth] User creation or lookup failed unexpectedly");
+                        return null;
+                    }
+
+                    return {
+                        id: user.id,
+                        email: user.email,
+                        name: user.name,
+                        image: user.image,
+                        phone: user.phone,
+                    };
+                } catch (error) {
+                    console.error("[Auth] Token verification failed:", error);
+                    return null;
+                }
             },
         }),
     ],
@@ -46,14 +89,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         signIn: "/login",
     },
     callbacks: {
-        async jwt({ token, user }) {
+        async jwt({ token, user, trigger, session }) {
             if (user) {
                 const dbUser = await prisma.user.findUnique({
-                    where: { email: user.email! },
+                    where: { id: user.id },
                 });
                 if (dbUser) {
                     token.role = dbUser.role;
                     token.id = dbUser.id;
+                    token.phone = dbUser.phone;
                 }
             }
             return token;

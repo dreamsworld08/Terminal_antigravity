@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { put } from "@vercel/blob";
 import crypto from "crypto";
 import path from "path";
+import { writeFile, mkdir } from "fs/promises";
+import fs from "fs";
 
 export async function POST(request: Request) {
     try {
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
             try {
                 const obj2gltf = (await import("obj2gltf")).default;
                 // Write raw OBJ to a temp file so obj2gltf can read it
-                const { writeFile, unlink } = await import("fs/promises");
+                const { unlink } = await import("fs/promises");
                 const tmpObjPath = `/tmp/_tmp_${hash}.obj`;
                 await writeFile(tmpObjPath, buffer);
 
@@ -43,13 +45,29 @@ export async function POST(request: Request) {
 
         const filename = `uploads/${hash}${extension}`;
 
-        // Upload to Vercel Blob Storage
-        const blob = await put(filename, buffer, {
-            access: "public",
-            contentType: file.type || "application/octet-stream",
-        });
-
-        return NextResponse.json({ url: blob.url }, { status: 201 });
+        // If Vercel Blob token is present, use it. Otherwise, save locally.
+        if (process.env.BLOB_READ_WRITE_TOKEN) {
+            // Upload to Vercel Blob Storage
+            const blob = await put(filename, buffer, {
+                access: "public",
+                contentType: file.type || "application/octet-stream",
+            });
+            return NextResponse.json({ url: blob.url }, { status: 201 });
+        } else {
+            // Local fallback
+            const publicDir = path.join(process.cwd(), "public");
+            const uploadDir = path.join(publicDir, "uploads");
+            
+            if (!fs.existsSync(uploadDir)) {
+                await mkdir(uploadDir, { recursive: true });
+            }
+            
+            const filePath = path.join(publicDir, filename);
+            await writeFile(filePath, buffer);
+            
+            const origin = request.headers.get("origin") || "http://localhost:3000";
+            return NextResponse.json({ url: `${origin}/${filename}` }, { status: 201 });
+        }
     } catch (error) {
         console.error("Upload error:", error);
         return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
